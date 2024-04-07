@@ -4,7 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"os/user"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -134,8 +139,74 @@ func interactivePicker(ctx context.Context, tasks []models.Task, dir string) err
 		return fmt.Errorf("xc parse error: %w", err)
 	}
 	err = runner.Run(ctx, task.Name, nil)
+	fmt.Println("Task name: " + task.Name)
 	if err != nil {
 		return fmt.Errorf("xc: %w", err)
+	}
+	err = addToShellHistory("xc " + task.Name)
+	if err != nil {
+		return fmt.Errorf("xc: %w", err)
+	}
+	return nil
+}
+
+// Function to detect shell and append command to history with proper handling for Zsh and Bash
+func addToShellHistory(command string) error {
+	currentUser, err := user.Current()
+	if err != nil {
+		return err
+	}
+	homeDir := currentUser.HomeDir
+
+	shell := os.Getenv("SHELL")
+	if strings.Contains(shell, "bash") {
+		historyFile := filepath.Join(homeDir, ".bash_history")
+		return appendToBashHistory(historyFile, command)
+	} else if strings.Contains(shell, "zsh") {
+		historyFile := filepath.Join(homeDir, ".zsh_history")
+		return appendToZshHistory(historyFile, command)
+	}
+	return nil
+}
+
+// Bash-specific function for appending to history
+func appendToBashHistory(historyFile, command string) error {
+	return appendToHistoryFile(historyFile, command+"\n")
+}
+
+// Zsh-specific function for appending to history, including formatting with timestamp
+func appendToZshHistory(historyFile, command string) error {
+	timestamp := time.Now().Unix()
+	formattedCommand := fmt.Sprintf(": %d:0;%s\n", timestamp, command)
+
+	err := appendToHistoryFile(historyFile, formattedCommand)
+	if err != nil {
+		return err
+	}
+	return callRefreshScript()
+}
+
+// General function to append a command to a history file
+func appendToHistoryFile(historyFile, command string) error {
+	file, err := os.OpenFile(historyFile, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0666)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(command); err != nil {
+		return err
+	}
+	return nil
+}
+
+func callRefreshScript() error {
+	scriptPath := "cmd/xc/refresh_history.zsh"
+
+	cmd := exec.Command(scriptPath)
+	err := cmd.Run()
+	if err != nil {
+		return err
 	}
 	return nil
 }
